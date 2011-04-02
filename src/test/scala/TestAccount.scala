@@ -1,6 +1,6 @@
 import org.scalatest.FunSuite
-import java.util.Date
-import java.util.Calendar
+import org.scala_tools.time.Imports._
+import org.joda.time.Days
 
 class TestAccount extends FunSuite {
   
@@ -11,7 +11,7 @@ class TestAccount extends FunSuite {
   
   test("deposit") {
     
-    val date = new Date
+    val date = DateTime.now
     val paycheck = new Deposit(500, "Paycheck", date)
     val account = new Account(1000)
     
@@ -23,10 +23,10 @@ class TestAccount extends FunSuite {
   
   test("multiple deposits") {
     
-    val paycheckDate = new Date()
+    val paycheckDate = DateTime.now
     val paycheck = new Deposit(500, "Paycheck", paycheckDate)
     
-    val interestPaymentDate = new Date()
+    val interestPaymentDate = DateTime.now
     val interestPayment = new Deposit(10,"Interest Payment",interestPaymentDate)
     val account = new Account(1000)
     val accountAfterPaycheck = account.deposit(paycheck)
@@ -40,7 +40,7 @@ class TestAccount extends FunSuite {
   }
   
   test("widthdraw") {
-    val expense = new Expense(100, "Mortgage",new Date())
+    val expense = new Expense(100, "Mortgage", DateTime.now)
     val account = new Account(1000)
     val newAccount = account.withdraw(expense)
     assert(newAccount.balance == 900)
@@ -49,8 +49,8 @@ class TestAccount extends FunSuite {
   
   test("test multiple expenses") {
     
-    val mortgage = new Expense(100, "Mortgage",new Date())
-    val cellphone = new Expense(50, "Cell Phone", new Date())
+    val mortgage = new Expense(100, "Mortgage", DateTime.now)
+    val cellphone = new Expense(50, "Cell Phone", DateTime.now)
     val account = new Account(1000)
     
     val accountAfterMortgage = account.withdraw(mortgage)
@@ -65,7 +65,7 @@ class TestAccount extends FunSuite {
   
   test("withdrawl more than balance") {
     
-    val mortgage = new Expense(1100, "Mortgage", new Date())
+    val mortgage = new Expense(1100, "Mortgage", DateTime.now)
     val account = new Account(1000)
     val accountWithFine = account.withdraw(mortgage)
     
@@ -75,11 +75,8 @@ class TestAccount extends FunSuite {
   }
   
   test("test pending expenses dont effect current balance") {
-    val calendar = Calendar.getInstance()
-    calendar.add(Calendar.MONTH, 1)
-    calendar.set(Calendar.DATE, 1)
-    val firstOfNextMonth = calendar.getTime()
-    val pendingExpense = new Expense(100, "Mortgage", firstOfNextMonth)
+    val nextMonth = (DateTime.now + 1.month).withDayOfMonth(1)
+    val pendingExpense = new Expense(100, "Mortgage", nextMonth)
     val account = new Account(1000)
     
     val accountAfterAddingPendingExpense = account.withdraw(pendingExpense)
@@ -87,11 +84,8 @@ class TestAccount extends FunSuite {
   }
   
   test("test pending deposits dont effect current balance") {
-    val calendar = Calendar.getInstance()
-    calendar.add(Calendar.MONTH, 1)
-    calendar.set(Calendar.DATE, 1)
-    val firstOfNextMonth = calendar.getTime()
-    val pendingDeposit = new Deposit(1000, "Paycheck", firstOfNextMonth)
+    val nextMonth = (DateTime.now + 1.month).withDayOfMonth(1)
+    val pendingDeposit = new Deposit(1000, "Paycheck", nextMonth)
     val account = new Account(1000)
     
     val accountAfterAddingPendingDeposit = account.deposit(pendingDeposit)
@@ -99,28 +93,63 @@ class TestAccount extends FunSuite {
   }
   
   test("test account projection") {
-    val budget = new Budget()
-    val calendar = Calendar.getInstance()
-    calendar.add(Calendar.MONTH, 1)
-    calendar.set(Calendar.DATE, 1)
+
+    val nextMonth = (DateTime.now + 1.month).withDayOfMonth(1)
+    val twoMonths = (DateTime.now + 2.month).withDayOfMonth(1)
+    val nextYear = DateTime.now + 1.year
+   
+    val expense = new Expense(100, "Mortgage", nextMonth)
+    val paycheck = new Deposit(1000, "Paycheck", twoMonths)
     
-    val later = Calendar.getInstance()
-    later.add(Calendar.YEAR,1)
-    val firstOfNextMonth = calendar.getTime()
-    val nextYear = later.getTime()
-    val expense = new Expense(100, "Mortgage", firstOfNextMonth)
-    val paycheck = new Deposit(1000, "Paycheck", firstOfNextMonth)
-    
-     
     val account = new Account(1000)
     val accountAfterExpense = account.withdraw(expense)
     val accountAfterPaycheck = accountAfterExpense.deposit(paycheck)
-
     val accountWithProjection = accountAfterPaycheck.project(nextYear)
+    
+    assert(accountWithProjection.deposits.size === 1)
+    assert(accountWithProjection.expenses.size === 1)
     assert(accountWithProjection.balance == 1900)
     assert(!accountWithProjection.pendingExpenses.contains(expense))
     assert(accountWithProjection.expenses.contains(expense))
     assert(!accountWithProjection.pendingDeposits.contains(paycheck))
     assert(accountWithProjection.deposits.contains(paycheck))
+  }
+  
+  test("projection sequence") {
+    val nextMonth = (DateTime.now + 1.month).withDayOfMonth(1)
+    val twoMonths = (DateTime.now + 2.month).withDayOfMonth(1)
+    val account = new Account(1000)
+    
+    val expense = new Expense(1500, "Mortgage", nextMonth)
+    val paycheck = new Deposit(1000, "Paycheck", twoMonths)
+    val accountAfterDeposit = account.deposit(paycheck)
+    val accountAfterExpense = accountAfterDeposit.withdraw(expense)
+    val projectedAccount = accountAfterExpense.project(DateTime.now + 3.months)
+
+    assert(projectedAccount.expenses(0).label == "Overdraft Fee")
+  }
+  
+  test("Recurring deposits") {
+    //create a recurring deposit with monthly recurrence 
+    val recurringDeposit = new RecurringDeposit(100, "Paycheck", (DateTime.now + 1.month).withDayOfMonth(1), Days.ONE.toPeriod())
+
+    val account = new Account(1000)
+    
+    val accountWithDeposit = account.deposit(recurringDeposit)
+    val projectedAccount = accountWithDeposit.project( (DateTime.now + 1.month).withDayOfMonth(1) + 10.days )
+    
+    assert(projectedAccount.balance===2000)
+  }
+  
+  test("Recurring withdrawals") {
+    val recurringExpense = new RecurringExpense(100, "Mortgage", (DateTime.now + 1.month).withDayOfMonth(1), Days.ONE.toPeriod())
+
+    val account = new Account(2000)
+    
+    val accountWithWithDrawal = account.withdraw(recurringExpense)
+    val projectedAccount = accountWithWithDrawal.project( (DateTime.now + 1.month).withDayOfMonth(1) + 10.days )
+    
+    
+    assert(projectedAccount.balance===1000)
   }
 }
